@@ -52,8 +52,15 @@ export const handler = async (event) => {
             downloadUrl = await getSignedUrl(s3Client, s3Command, { expiresIn: 300 });
         }
 
+        // 🛡️ Explicitly return CORS headers for REST APIs
+        const corsHeaders = {
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Credentials": true,
+        };
+
         return { 
             statusCode: 200, 
+            headers: corsHeaders, // 👈 THE MAGIC FIX!
             body: JSON.stringify({ 
                 message: isDestroyed ? "Record permanently destroyed." : `Record viewed. ${remainingViews} views remaining.`, 
                 secretData: secretItem.secretData, 
@@ -61,6 +68,10 @@ export const handler = async (event) => {
             }) 
         };
     } catch (error) {
-        return { statusCode: 500, body: JSON.stringify({ error: "Internal server error" }) };
+        return { 
+            statusCode: 500, 
+            headers: { "Access-Control-Allow-Origin": "*" }, // 👈 Catch block needs it too!
+            body: JSON.stringify({ error: "Internal server error" }) 
+        };
     }
 };

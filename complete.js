@@ -43,9 +43,25 @@ export const handler = async (event) => {
         });
         await docClient.send(vaultCommand);
 
-        return { statusCode: 200, body: JSON.stringify({ id: secretId }) };
+        // ... previous logic stays the same ...
+        
+        // 🛡️ NEW: Explicitly return CORS headers for REST APIs
+        const corsHeaders = {
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Credentials": true,
+        };
+
+        return { 
+            statusCode: 200, 
+            headers: corsHeaders,
+            body: JSON.stringify({ id: secretId }) 
+        };
     } catch (error) {
         console.error(error);
-        return { statusCode: 500, body: JSON.stringify({ error: error.message || "Unknown error" }) };
+        return { 
+            statusCode: 500, 
+            headers: { "Access-Control-Allow-Origin": "*" },
+            body: JSON.stringify({ error: error.message || "Unknown error" }) 
+        };
     }
 };

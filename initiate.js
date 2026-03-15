@@ -32,9 +32,22 @@ export const handler = async (event) => {
             presignedUrls.push(url);
         }
 
-        return { statusCode: 200, body: JSON.stringify({ secretId, uploadId, presignedUrls }) };
+       const corsHeaders = {
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Credentials": true,
+        };
+
+        return { 
+            statusCode: 200, 
+            headers: corsHeaders, 
+            body: JSON.stringify({ secretId, uploadId, presignedUrls }) 
+        };
     } catch (error) {
         console.error(error);
-        return { statusCode: 500, body: JSON.stringify({ error: error.message || "Unknown error" }) };
+        return { 
+            statusCode: 500, 
+            headers: { "Access-Control-Allow-Origin": "*" }, 
+            body: JSON.stringify({ error: error.message || "Unknown error" }) 
+        };
     }
 };
