@@ -1,29 +1,30 @@
-const AWS = require("aws-sdk");
-const docClient = new AWS.DynamoDB.DocumentClient();
-const s3 = new AWS.S3();
-
-const TABLE_NAME = "SecretSharer-v2";
-const BUCKET_NAME = "secret-sharer-files-param-123";
-
 exports.handler = async (event) => {
-    // 🛡️ Safe, stripped-down CORS headers
-    const headers = {
+    // 🛡️ The net: We guarantee CORS is ALWAYS returned no matter what happens
+    const corsHeaders = {
         "Access-Control-Allow-Origin": "*",
-        "Access-Control-Allow-Methods": "OPTIONS,POST,GET",
-        "Access-Control-Allow-Headers": "Content-Type"
+        "Access-Control-Allow-Credentials": true
     };
 
     try {
-        const body = JSON.parse(event.body);
+        // 🚨 Moving ALL imports INSIDE the try block. 
+        // If AWS SDK is missing, it will be trapped here instead of crashing the server!
+        const AWS = require("aws-sdk");
+        const docClient = new AWS.DynamoDB.DocumentClient();
+        const s3 = new AWS.S3();
 
-        // 1. Zero-dependency ID generation (No 'crypto' module needed!)
+        const TABLE_NAME = "SecretSharer-v2";
+        const BUCKET_NAME = "secret-sharer-files-param-123";
+
+        if (!event.body) {
+            return { statusCode: 400, headers: corsHeaders, body: JSON.stringify({ error: "AWS provided an empty body" }) };
+        }
+
+        const body = JSON.parse(event.body);
         const fallbackId = Date.now().toString(36) + Math.random().toString(36).substring(2);
         const finalId = body.secretId || fallbackId;
 
-        // 2. Stitch S3 Chunks safely
+        // Stitch S3 chunks safely
         if (body.hasFile && body.etags && body.uploadId) {
-            
-            // 🛠️ FIX: S3 strictly requires double-quotes around ETags. We add them back here safely.
             const fixedParts = body.etags.map(part => ({
                 PartNumber: part.PartNumber,
                 ETag: part.ETag.includes('"') ? part.ETag : `"${part.ETag}"`
@@ -37,7 +38,7 @@ exports.handler = async (event) => {
             }).promise();
         }
 
-        // 3. Prepare DynamoDB record
+        // Prepare Database Row
         const item = {
             secretId: finalId,
             secretData: body.secretData || "EMPTY",
@@ -47,27 +48,26 @@ exports.handler = async (event) => {
             createdAt: new Date().toISOString()
         };
 
-        // 4. Attach TTL Safely
         if (body.expireSeconds) {
             item.ttl = Math.floor(Date.now() / 1000) + parseInt(body.expireSeconds);
         }
 
-        // 5. Commit to Database
+        // Commit to DB
         await docClient.put({ TableName: TABLE_NAME, Item: item }).promise();
 
-        return { 
-            statusCode: 200, 
-            headers: headers, 
-            body: JSON.stringify({ id: finalId }) 
-        };
+        return { statusCode: 200, headers: corsHeaders, body: JSON.stringify({ id: finalId }) };
 
     } catch (error) {
-        console.error("LAMBDA ERROR:", error);
-        // 🛡️ Even if it fails, we return a 400 with headers so the browser can actually read the error!
+        // 🪤 THE TRAP SPRINGS: This catches the fatal crash and sends it to your browser!
+        console.error("FATAL TRAPPED ERROR:", error);
         return { 
-            statusCode: 400, 
-            headers: headers, 
-            body: JSON.stringify({ error: error.message || "Unknown Error" }) 
+            statusCode: 500, 
+            headers: corsHeaders, 
+            body: JSON.stringify({ 
+                error: "BACKEND CRASH TRAPPED", 
+                message: error.message,
+                stack: error.stack
+            }) 
         };
     }
 };
