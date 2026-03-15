@@ -3,11 +3,8 @@ frameworkVersion: '3'
 
 provider:
   name: aws
-  runtime: nodejs20.x
+  runtime: nodejs18.x # 👈 Rolled back to stable 18.x to prevent module crashes
   region: ap-south-1
-  environment:
-    # 👈 This passes the exact SNS loud-speaker address to our Lambda!
-    SNS_TOPIC_ARN: !Ref DeadDropAuditTopic 
   iam:
     role:
       statements:
@@ -22,12 +19,10 @@ provider:
           Resource:
             - arn:aws:s3:::secret-sharer-files-param-123
             - arn:aws:s3:::secret-sharer-files-param-123/*
-        # 🛡️ Give Lambda permission to fire off Emails
         - Effect: Allow
           Action:
-            - sns:Publish
-          Resource:
-            - !Ref DeadDropAuditTopic
+            - sns:*
+          Resource: "*"
 
 functions:
   initiateUpload:
@@ -39,7 +34,7 @@ functions:
           cors: true
   completeUpload:
     handler: complete.handler
-    timeout: 30
+    timeout: 30 # 👈 Gives S3 plenty of time to stitch the file
     events:
       - http:
           path: v2/complete
@@ -66,44 +61,3 @@ resources:
           - AttributeName: secretId
             KeyType: HASH
         BillingMode: PAY_PER_REQUEST
-        SSESpecification:
-          SSEEnabled: true 
-
-    DeadDropWAF:
-      Type: AWS::WAFv2::WebACL
-      Properties:
-        Name: DeadDrop-DDoS-Protection
-        Scope: REGIONAL
-        DefaultAction:
-          Allow: {}
-        VisibilityConfig:
-          CloudWatchMetricsEnabled: true
-          MetricName: DeadDropWAF
-          SampledRequestsEnabled: true
-        Rules:
-          - Name: BlockSpamBots
-            Priority: 1
-            Action:
-              Block: {}
-            Statement:
-              RateBasedStatement:
-                AggregateKeyType: IP
-                Limit: 100 
-            VisibilityConfig:
-              CloudWatchMetricsEnabled: true
-              MetricName: BlockSpamBots
-              SampledRequestsEnabled: true
-
-    # 📧 1. The Amazon SNS Email Engine
-    DeadDropAuditTopic:
-      Type: AWS::SNS::Topic
-      Properties:
-        TopicName: DeadDrop-Audit-Alerts
-
-    # 📧 2. Your Email Subscription (AWS will send you a confirmation link!)
-    DeadDropEmailSubscription:
-      Type: AWS::SNS::Subscription
-      Properties:
-        Endpoint: "paramvadhadiya2@gmail.com" # 🚨 PUT YOUR EMAIL HERE!
-        Protocol: email
-        TopicArn: !Ref DeadDropAuditTopic
