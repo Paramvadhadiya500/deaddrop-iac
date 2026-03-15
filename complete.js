@@ -1,4 +1,5 @@
 const AWS = require("aws-sdk");
+const crypto = require("crypto"); // 👈 The 100% safe, built-in Node.js module
 const docClient = new AWS.DynamoDB.DocumentClient();
 const s3 = new AWS.S3();
 
@@ -6,72 +7,51 @@ const TABLE_NAME = "SecretSharer-v2";
 const BUCKET_NAME = "secret-sharer-files-param-123";
 
 exports.handler = async (event) => {
-    // 🛡️ Bulletproof CORS Headers (Removed Allow-Credentials to prevent wildcard conflicts)
+    // 🛡️ Restored your original, working CORS headers
     const corsHeaders = {
         "Access-Control-Allow-Origin": "*",
-        "Access-Control-Allow-Methods": "OPTIONS,POST,GET",
-        "Access-Control-Allow-Headers": "Content-Type"
+        "Access-Control-Allow-Credentials": true,
     };
 
     try {
-        console.log("Incoming Request Payload:", event.body);
-        if (!event.body) throw new Error("Missing request body");
-
-        const body = typeof event.body === "string" ? JSON.parse(event.body) : event.body;
+        const body = JSON.parse(event.body);
         const { secretId, uploadId, etags, secretData, hasFile, maxViews, expireSeconds, wantsAlert } = body;
 
-        // 1. Generate ID if Text-Only (Safe AWS UUID method)
-        const finalId = secretId || AWS.util.uuid.v4();
-        console.log("Assigned ID:", finalId);
+        // 1. Generate ID safely if it's a text-only upload
+        const finalId = secretId || crypto.randomBytes(16).toString("hex");
 
-        // 2. Stitch S3 Chunks
-        if (hasFile && etags && uploadId) {
-            console.log("Stitching S3 parts...");
-            
-            // 🛡️ Ensure ETags have strict double-quotes (AWS S3 randomly crashes without these)
-            const formattedParts = etags.map(p => ({
-                PartNumber: p.PartNumber,
-                ETag: p.ETag.includes('"') ? p.ETag : `"${p.ETag}"`
-            }));
-
+        // 2. Stitch S3 chunks (Restored your original, working logic)
+        if (hasFile) {
             await s3.completeMultipartUpload({
                 Bucket: BUCKET_NAME,
                 Key: `uploads/${finalId}`,
-                MultipartUpload: { Parts: formattedParts },
+                MultipartUpload: { Parts: etags },
                 UploadId: uploadId
             }).promise();
-            console.log("S3 Stitching Complete.");
         }
 
-        // 3. Prepare DynamoDB record safely
-        console.log("Saving metadata to DynamoDB...");
+        // 3. Prepare DynamoDB record
         const item = {
             secretId: finalId,
-            secretData: secretData || "",
-            hasFile: hasFile || false,
-            viewsRemaining: maxViews !== undefined ? parseInt(maxViews) : 1,
-            wantsAlert: wantsAlert || false,
+            secretData: secretData || " ", // DynamoDB crashes on completely empty strings
+            hasFile: hasFile,
+            viewsRemaining: maxViews,
+            wantsAlert: wantsAlert || false, // 👈 The only new feature we actually needed
             createdAt: new Date().toISOString()
         };
 
-        // 4. Attach TTL Safely
+        // 4. Attach TTL safely
         if (expireSeconds) {
-            const ttl = Math.floor(Date.now() / 1000) + parseInt(expireSeconds);
-            if (!isNaN(ttl)) item.ttl = ttl;
+            item.ttl = Math.floor(Date.now() / 1000) + parseInt(expireSeconds);
         }
 
-        // 5. Commit
+        // 5. Commit to Database
         await docClient.put({ TableName: TABLE_NAME, Item: item }).promise();
-        console.log("DynamoDB Save Complete.");
 
         return { statusCode: 200, headers: corsHeaders, body: JSON.stringify({ id: finalId }) };
 
     } catch (error) {
-        console.error("CRITICAL LAMBDA ERROR:", error);
-        return { 
-            statusCode: 500, 
-            headers: corsHeaders, 
-            body: JSON.stringify({ error: error.message || "Internal server error" }) 
-        };
+        console.error(error);
+        return { statusCode: 500, headers: corsHeaders, body: JSON.stringify({ error: error.message }) };
     }
 };
