@@ -1,0 +1,57 @@
+service: deaddrop-v2
+frameworkVersion: '3'
+
+provider:
+  name: aws
+  runtime: nodejs20.x
+  region: ap-south-1
+  httpApi:          
+    cors: true
+  iam:
+    role:
+      statements:
+        - Effect: Allow
+          Action:
+            - dynamodb:*
+          Resource:
+            - !GetAtt DeadDropTableV2.Arn
+        - Effect: Allow
+          Action:
+            - s3:*
+          Resource:
+            - arn:aws:s3:::secret-sharer-files-param-123
+            - arn:aws:s3:::secret-sharer-files-param-123/*
+
+functions:
+  initiateUpload:
+    handler: initiate.handler
+    events:
+      - httpApi:
+          path: /v2/initiate
+          method: post
+  completeUpload:
+    handler: complete.handler
+    events:
+      - httpApi:
+          path: /v2/complete
+          method: post
+  readSecret:
+    handler: read.handler
+    events:
+      - httpApi:
+          path: /v2/read
+          method: post
+
+resources:
+  Resources:
+    DeadDropTableV2:
+      Type: AWS::DynamoDB::Table
+      Properties:
+        TableName: SecretSharer-v2
+        AttributeDefinitions:
+          - AttributeName: secretId
+            AttributeType: S
+        KeySchema:
+          - AttributeName: secretId
+            KeyType: HASH
+        BillingMode: PAY_PER_REQUEST
