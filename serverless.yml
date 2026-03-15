@@ -39,6 +39,7 @@ functions:
           cors: true
   completeUpload:
     handler: complete.handler
+    timeout: 30
     events:
       - http:
           path: v2/complete
