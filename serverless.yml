@@ -1,10 +1,13 @@
-service: deaddrop-v2 # 👈 FIXED: Back to your original master stack name!
+service: deaddrop-v2
 frameworkVersion: '3'
 
 provider:
   name: aws
   runtime: nodejs20.x
   region: ap-south-1
+  environment:
+    # 👈 This passes the exact SNS loud-speaker address to our Lambda!
+    SNS_TOPIC_ARN: !Ref DeadDropAuditTopic 
   iam:
     role:
       statements:
@@ -19,6 +22,12 @@ provider:
           Resource:
             - arn:aws:s3:::secret-sharer-files-param-123
             - arn:aws:s3:::secret-sharer-files-param-123/*
+        # 🛡️ Give Lambda permission to fire off Emails
+        - Effect: Allow
+          Action:
+            - sns:Publish
+          Resource:
+            - !Ref DeadDropAuditTopic
 
 functions:
   initiateUpload:
@@ -45,7 +54,6 @@ functions:
 
 resources:
   Resources:
-    # 🗄️ 1. KMS Encrypted Database
     DeadDropTableV2:
       Type: AWS::DynamoDB::Table
       Properties:
@@ -58,9 +66,8 @@ resources:
             KeyType: HASH
         BillingMode: PAY_PER_REQUEST
         SSESpecification:
-          SSEEnabled: true # 👈 KMS Hardware Encryption enabled!
+          SSEEnabled: true 
 
-    # 🧱 2. AWS WAFv2 Firewall (Built and ready for action)
     DeadDropWAF:
       Type: AWS::WAFv2::WebACL
       Properties:
@@ -85,3 +92,17 @@ resources:
               CloudWatchMetricsEnabled: true
               MetricName: BlockSpamBots
               SampledRequestsEnabled: true
+
+    # 📧 1. The Amazon SNS Email Engine
+    DeadDropAuditTopic:
+      Type: AWS::SNS::Topic
+      Properties:
+        TopicName: DeadDrop-Audit-Alerts
+
+    # 📧 2. Your Email Subscription (AWS will send you a confirmation link!)
+    DeadDropEmailSubscription:
+      Type: AWS::SNS::Subscription
+      Properties:
+        Endpoint: "paramvadhadiya2@gmail.com" # 🚨 PUT YOUR EMAIL HERE!
+        Protocol: email
+        TopicArn: !Ref DeadDropAuditTopic
