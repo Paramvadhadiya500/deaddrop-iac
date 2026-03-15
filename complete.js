@@ -1,67 +1,52 @@
-import { S3Client, CompleteMultipartUploadCommand } from "@aws-sdk/client-s3";
-import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
-import { DynamoDBDocumentClient, PutCommand } from "@aws-sdk/lib-dynamodb";
-import crypto from "crypto";
+const AWS = require("aws-sdk");
+const docClient = new AWS.DynamoDB.DocumentClient();
+const s3 = new AWS.S3();
 
-const s3Client = new S3Client({ region: "ap-south-1" });
-const dbClient = new DynamoDBClient({ region: "ap-south-1" });
-const docClient = DynamoDBDocumentClient.from(dbClient);
+const TABLE_NAME = "SecretSharer-v2";
 const BUCKET_NAME = "secret-sharer-files-param-123";
 
-export const handler = async (event) => {
+exports.handler = async (event) => {
+    // 🛡️ Ensure CORS is always returned
+    const corsHeaders = {
+        "Access-Control-Allow-Origin": "*",
+        "Access-Control-Allow-Credentials": true,
+    };
+
     try {
-        // 🛡️ Enterprise Base64 parsing shield
-        let bodyString = event.body || "{}";
-        if (event.isBase64Encoded) {
-            bodyString = Buffer.from(event.body, 'base64').toString('utf8');
-        }
-        const body = JSON.parse(bodyString);
-        
-        const secretId = body.secretId || crypto.randomUUID();
+        const body = JSON.parse(event.body);
+        const { secretId, uploadId, etags, secretData, hasFile, maxViews, expireSeconds, wantsAlert } = body;
 
-        // 1. If it's a file, stitch the chunks back together in S3
-        if (body.hasFile && body.uploadId && body.etags) {
-            const completeCmd = new CompleteMultipartUploadCommand({
+        // 1. Stitch S3 chunks together if a file exists
+        if (hasFile) {
+            await s3.completeMultipartUpload({
                 Bucket: BUCKET_NAME,
-                Key: secretId,
-                UploadId: body.uploadId,
-                MultipartUpload: { Parts: body.etags } 
-            });
-            await s3Client.send(completeCmd);
+                Key: `uploads/${secretId}`,
+                MultipartUpload: { Parts: etags },
+                UploadId: uploadId
+            }).promise();
         }
 
-        // 2. Save metadata to DynamoDB
-        const vaultCommand = new PutCommand({
-            TableName: "SecretSharer-v2",
-            Item: {
-                secretId: secretId,
-                secretData: body.secretData,
-                hasFile: body.hasFile,
-                maxViews: body.maxViews || 1,
-                expiresAt: Math.floor(Date.now() / 1000) + (parseInt(body.expireSeconds) || 86400)
-            }
-        });
-        await docClient.send(vaultCommand);
-
-        // ... previous logic stays the same ...
-        
-        // 🛡️ NEW: Explicitly return CORS headers for REST APIs
-        const corsHeaders = {
-            "Access-Control-Allow-Origin": "*",
-            "Access-Control-Allow-Credentials": true,
+        // 2. Prepare the database record
+        const item = {
+            secretId,
+            secretData,
+            hasFile,
+            viewsRemaining: maxViews,
+            wantsAlert: wantsAlert || false, // 👈 NEW: Save the audit preference!
+            createdAt: new Date().toISOString()
         };
 
-        return { 
-            statusCode: 200, 
-            headers: corsHeaders,
-            body: JSON.stringify({ id: secretId }) 
-        };
+        // 3. Attach TTL (Time To Live) if provided
+        if (expireSeconds) {
+            item.ttl = Math.floor(Date.now() / 1000) + expireSeconds;
+        }
+
+        // 4. Commit to DynamoDB
+        await docClient.put({ TableName: TABLE_NAME, Item: item }).promise();
+
+        return { statusCode: 200, headers: corsHeaders, body: JSON.stringify({ id: secretId }) };
     } catch (error) {
         console.error(error);
-        return { 
-            statusCode: 500, 
-            headers: { "Access-Control-Allow-Origin": "*" },
-            body: JSON.stringify({ error: error.message || "Unknown error" }) 
-        };
+        return { statusCode: 500, headers: corsHeaders, body: JSON.stringify({ error: "Internal server error" }) };
     }
 };
